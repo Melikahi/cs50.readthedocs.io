@@ -1,114 +1,170 @@
-# `submit50`
+import csv
+import sys
+import calendar
+import math
+import numpy as np
+from sklearn.metrics import f1_score
+from sklearn.neighbors import NearestNeighbors
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import confusion_matrix
+TEST_SIZE = 0.4
 
-`submit50` is a command-line tool with which you can submit work (e.g., problem sets) to a course (e.g., CS50). It's based on `git`, a "distributed version control system" that allows you to save different versions of files without having to give each version a unique filename (as you might be wont to do on your own Mac or PC!). Via `submit50` and, in turn, `git` can you thus submit work multiple times (i.e., multiple versions thereof).
+def main():
+    # Check command-line arguments
+    if len(sys.argv) != 2:
+        sys.exit("Usage: python shopping.py data")
 
-When you run `submit50`, your files are "pushed" (i.e., uploaded) to CS50's "organization" (also named "submit50") on [GitHub](https://github.com/), a popular service via which developers (like you!) can share code. Your files are stored in a "repository" (a folder, essentially) to which only you and some of CS50's staff have access (and anyone else to whom you grant access). Your work can thus be reviewed and scored in one central place, whether you wrote it in [CS50 IDE](https://ide.cs50.io/) or elsewhere!
+    # Load data from spreadsheet and split into train and test sets
+    evidence, labels = load_data(sys.argv[1])
+    X_train, X_test, y_train, y_test = train_test_split(evidence, labels, test_size=TEST_SIZE)
 
-## Installation
+    # Train model and make predictions
+    predictions = []
 
-1. Install [Python 3.6](/python) or later, if you haven't already.
-1. Install [`pip`](/pip), if you haven't already.
-1. Install `submit50` itself:
-    ```text
-    pip3 install submit50
-    ```
-  Note: If on Windows, please first install [Windows Subsystem for Linux (WSL)](https://docs.microsoft.com/en-us/windows/wsl/install-win10). We recommend choosing the `Ubuntu` distribution. Then within WSL, follow the above steps to install `submit50`.
+    for test_sample in X_test:
+        nearest_neighbor = find_nearest_neighbor(test_sample, X_train, y_train)
+        predictions.append(nearest_neighbor)
 
-### Upgrading
+    sensitivity, specificity = evaluate(y_test, predictions)
+    f1_score = calculate_f1_score(y_test, predictions)
 
-```text
-pip3 install --upgrade submit50
-```
+    # Calculate the number of correct predictions
+    correct_predictions = np.sum(np.array(y_test) == np.array(predictions))
+    incorrect_predictions = np.sum(np.array(y_test) != np.array(predictions))
 
-## Usage
+    # Print results
+    print(f"Correct: {correct_predictions}")
+    print(f"Incorrect: {incorrect_predictions}")
+    print(f"True Positive Rate: {100 * sensitivity:.2f}%")
+    print(f"True Negative Rate: {100 * specificity:.2f}")
+    print(f"F1 Score: {f1_score:.2f}")
 
-```text
-usage: submit50 [-h] [--logout] [--log-level {debug,info,warning,error}] [-V] slug
+def load_data(filename):
+    """
+    Load shopping data from a CSV file `filename` and convert into a list of
+    evidence lists and a list of labels. Return a tuple (evidence, labels).
 
-positional arguments:
-  slug                  prescribed identifier of work to submit
+    evidence should be a list of lists, where each list contains the
+    following values, in order:
+        - Administrative, an integer
+        - Administrative_Duration, a floating point number
+        - Informational, an integer
+        - Informational_Duration, a floating point number
+        - ProductRelated, an integer
+        - ProductRelated_Duration, a floating point number
+        - BounceRates, a floating point number
+        - ExitRates, a floating point number
+        - PageValues, a floating point number
+        - SpecialDay, a floating point number
+        - Month, an index from 0 (January) to 11 (December)
+        - OperatingSystems, an integer
+        - Browser, an integer
+        - Region, an integer
+        - TrafficType, an integer
+        - VisitorType, an integer 0 (not returning) or 1 (returning)
+        - Weekend, an integer 0 (if false) or 1 (if true)
 
-optional arguments:
-  -h, --help            show this help message and exit
+    labels should be the corresponding list of labels, where each label
+    is 1 if Revenue is true, and 0 otherwise.
+    """
+    months = {month: index-1 for index, month in enumerate(calendar.month_abbr) if index}
+    months['June'] = months.pop('Jun')
 
-  --logout              logout of submit50
+    evidence = []
+    labels = []
 
-  --log-level {debug,info,warning,error}
-                        warning: displays usage warnings.
-                        info: adds all commands run.
-                        debug: adds the output of all commands run.
+    with open(filename, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            evidence.append([
+                int(row['Administrative']),
+                float(row['Administrative_Duration']),
+                int(row['Informational']),
+                float(row['Informational_Duration']),
+                int(row['ProductRelated']),
+                float(row['ProductRelated_Duration']),
+                float(row['BounceRates']),
+                float(row['ExitRates']),
+                float(row['PageValues']),
+                float(row['SpecialDay']),
+                months[row['Month']],
+                int(row['OperatingSystems']),
+                int(row['Browser']),
+                int(row['Region']),
+                int(row['TrafficType']),
+                1 if row['VisitorType'] == 'Returning_Visitor' else 0,
+                1 if row['Weekend'] == 'TRUE' else 0
+            ])
+            labels.append(1 if row['Revenue'] == 'TRUE' else 0)
 
-  -V, --version         show program's version number and exit
-```
+    return (evidence, labels)
 
-## Examples
 
-### Submitting with `submit50`
+def find_nearest_neighbor(test_sample, X_train, y_train):
+    # Initialize variables for nearest neighbor search
+    nearest_distance = float('inf')
+    nearest_neighbor = None
 
-To submit work with `submit50`, `cd` to the work's directory and execute
+    for train_sample, label in zip(X_train, y_train):
+        distance = euclidean_distance(test_sample, train_sample)
+        if distance < nearest_distance:
+            nearest_distance = distance
+            nearest_neighbor = label
 
-```text
-submit50 slug
-```
+    return nearest_neighbor
 
-where `slug` is the unique identifier for the work you're submitting, as prescribed by the course (as in a problem's specification). Although the `slug` might resemble the path to a directory, it's simply a unique identifier, independent of your own work's location. If you've not recently run `submit50` (within the past week), you might be prompted to log in with your GitHub username and password. (Per the [source code](https://github.com/cs50/submit50) for `submit50`, your username and password are sent only to GitHub, not to CS50's own servers.) You will then be prompted to confirm whether you indeed want to submit one or more files from your current directory, unless you're missing one or more required files, in which case `submit50` will instead exit without submitting anything.
+def euclidean_distance(sample1, sample2):
+    # Calculate Euclidean distance between two samples
+    distance = 0.0
+    for i in range(len(sample1)):
+        distance += (sample1[i] - sample2[i]) ** 2
+    return math.sqrt(distance)
 
-#### Via SSH
+def calculate_f1_score(y_true, y_pred):
+    true_positives = sum(1 for true, pred in zip(y_true, y_pred) if true == 1 and pred == 1)
+    false_positives = sum(1 for true, pred in zip(y_true, y_pred) if true == 0 and pred == 1)
+    false_negatives = sum(1 for true, pred in zip(y_true, y_pred) if true == 1 and pred == 0)
 
-By default, `submit50` pushes your work to GitHub via HTTPS, which requires your GitHub username and password, which is why `submit50` prompts you for both at least once per week. If you'd prefer not to provide `submit50` with your GitHub username and password at all, you can instead push your work to GitHub via SSH. Configure your workspace on [CS50 IDE](https://ide.cs50.io/) (or your own computer) as follows.
+    precision = true_positives / (true_positives + false_positives)
+    recall = true_positives / (true_positives + false_negatives)
 
-1. [Generate an SSH key and add it to `ssh-agent`](https://help.github.com/articles/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent/).
-1. [Add the SSH key to your GitHub account](https://help.github.com/articles/adding-a-new-ssh-key-to-your-github-account/).
-1. Execute
-   ```text
-   ssh -T -p443 git@ssh.github.com
-   ```
-   to add `ssh.github.com` to the list of known hosts for `ssh`, answering "yes" if prompted whether you're sure you want to continue connecting. If all goes well, you should see the message
+    f1_score = 2 * (precision * recall) / (precision + recall)
+    return f1_score
 
-    ```text
-    Hi <USERNAME>! You've successfully authenticated, but GitHub does not provide shell access.
-    Connection to github.com closed.
-    ```
-  (where `<USERNAME>` is your GitHub username).
+def train_model(evidence, labels):
+    """
+    Given a list of evidence lists and a list of labels, return a
+    fitted k-nearest neighbor model (k=1) trained on the data.
+    """
+    model = KNeighborsClassifier(n_neighbors=1)
+    model.fit(evidence, labels)
 
-Thereafter, you should be able to run `submit50` without ever being prompted for your GitHub username or password.
+    return model
 
-### Submitting without `submit50`
+def evaluate(labels, predictions):
+    sensitivity = float(0)
+    specificity = float(0)
 
-If comfortable with `git`, you can submit work without `submit50`. Simply push your work to the expected branch (i.e., the work's prescribed slug which is found in the "How to Submit" section of each project.) of `https://github.com/submit50/jharvard` (or `git@github.com:submit50/jharvard.git`), where `jharvard` is your own GitHub username. To get started, either clone that repository or add it to an existing repository as a remote.
+    total_positive = float(0)
+    total_negative = float(0)
 
-On each such branch, take care to create a `.gitignore` file based on `https://github.com/cs50/checks/raw/master/slug/submit50/exclude`, where `slug` is as before, so that you don't submit files that `submit50` would otherwise ignore.
+    for label, prediction in zip(labels, predictions):
 
-Note again that the branch should not be `master`, `main`, or the like, and instead be the work's prescribed slug as listed in the project specification.
+        if label == 1:
+            total_positive += 1
+            if label == prediction:
+                sensitivity += 1
 
-## Implementation Details
+        if label == 0:
+            total_negative += 1
+            if label == prediction:
+                specificity += 1
 
-To see how `submit50` uses `git` underneath the hood, execute
+    sensitivity /= total_positive
+    specificity /= total_negative
 
-```text
-submit50 --log-level info slug
-```
-or
+    return sensitivity, specificity
 
-```text
-submit50 --log-level debug slug
-```
-where `slug` is the unique identifier for the work you're submitting.
-
-## FAQs
-
-### Do I need to provide `submit50` with my GitHub username and password?
-
-Nope, you can instead authenticate [via SSH](#via-ssh).
-
-### If I use `git` locally, will `submit50` affect my local repository?
-
-Nope, `submit50` uses its own `GIT_DIR` (in `/tmp`). It will ignore any `.git` directory that you might have locally.
-
-### How does `submit50` remember my GitHub password?
-
-`submit50` remembers your username and password in RAM using [`git-credential-cache`](https://git-scm.com/docs/git-credential-cache/). Your password is never stored on disk or transmitted elsewhere.
-
-## Source Code
-
-<https://github.com/cs50/submit50>
+if __name__ == "__main__":
+    main()
